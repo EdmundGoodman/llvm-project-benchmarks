@@ -8,7 +8,7 @@ instructions for running them are not easily available online. This repo
 consolidates the benchmark code with instructions for running it in a single
 easier-to-find location.
 
-## The benchmarks
+## Finding the benchmarks
 
 The benchmarks discussed in this talk are available on a branch of Medhi's fork of
 LLVM [available here](https://github.com/joker-eph/llvm-project/tree/benchmarks),
@@ -65,8 +65,6 @@ benchmark [--benchmark_list_tests={true|false}]
           [--benchmark_time_unit={ns|us|ms|s}]
           [--v=<verbosity>]
 ```
-
-## References
 
 [^1]: <https://www.youtube.com/watch?v=7qvVMUSxqz4>
 [^2]: <https://llvm.org/devmtg/2024-04/slides/Keynote/Amini-Niu-HowSlowIsMLIR.pdf>
