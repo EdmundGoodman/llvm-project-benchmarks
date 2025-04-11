@@ -68,6 +68,6 @@ benchmark [--benchmark_list_tests={true|false}]
 
 ## References
 
-[^1] <https://www.youtube.com/watch?v=7qvVMUSxqz4>
-[^2] <https://llvm.org/devmtg/2024-04/slides/Keynote/Amini-Niu-HowSlowIsMLIR.pdf>
-[^3] <https://mlir.llvm.org/>
+[^1]: <https://www.youtube.com/watch?v=7qvVMUSxqz4>
+[^2]: <https://llvm.org/devmtg/2024-04/slides/Keynote/Amini-Niu-HowSlowIsMLIR.pdf>
+[^3]: <https://mlir.llvm.org/>
