@@ -132,109 +132,122 @@ LogicalResult PatternApplicator::matchAndRewrite(
     function_ref<bool(const Pattern &)> canApply,
     function_ref<void(const Pattern &)> onFailure,
     function_ref<LogicalResult(const Pattern &)> onSuccess) {
-  // Before checking native patterns, first match against the bytecode. This
-  // won't automatically perform any rewrites so there is no need to worry about
-  // conflicts.
-  SmallVector<PDLByteCode::MatchResult, 4> pdlMatches;
-  const PDLByteCode *bytecode = frozenPatternList.getPDLByteCode();
-  if (bytecode)
-    bytecode->match(op, rewriter, pdlMatches, *mutableByteCodeState);
 
-  // Check to see if there are patterns matching this specific operation type.
-  MutableArrayRef<const RewritePattern *> opPatterns;
-  auto patternIt = patterns.find(op->getName());
-  if (patternIt != patterns.end())
-    opPatterns = patternIt->second;
-
-  // Process the patterns for that match the specific operation type, and any
-  // operation type in an interleaved fashion.
-  unsigned opIt = 0, opE = opPatterns.size();
-  unsigned anyIt = 0, anyE = anyOpPatterns.size();
-  unsigned pdlIt = 0, pdlE = pdlMatches.size();
+  rewriter.setInsertionPoint(op);
   LogicalResult result = failure();
-  do {
-    // Find the next pattern with the highest benefit.
-    const Pattern *bestPattern = nullptr;
-    unsigned *bestPatternIt = &opIt;
-
-    /// Operation specific patterns.
-    if (opIt < opE)
-      bestPattern = opPatterns[opIt];
-    /// Operation agnostic patterns.
-    if (anyIt < anyE &&
-        (!bestPattern ||
-         bestPattern->getBenefit() < anyOpPatterns[anyIt]->getBenefit())) {
-      bestPatternIt = &anyIt;
-      bestPattern = anyOpPatterns[anyIt];
+  auto mapIter = patterns.find(op->getName());
+  if (mapIter != patterns.end()) {
+    const SmallVector<const RewritePattern *, 2> &opPatterns = mapIter->second;
+    if (!opPatterns.empty()) {
+      const RewritePattern *bestPattern = opPatterns[0];
+      result = bestPattern->matchAndRewrite(op, rewriter);
     }
-
-    const PDLByteCode::MatchResult *pdlMatch = nullptr;
-    /// PDL patterns.
-    if (pdlIt < pdlE && (!bestPattern || bestPattern->getBenefit() <
-                                             pdlMatches[pdlIt].benefit)) {
-      bestPatternIt = &pdlIt;
-      pdlMatch = &pdlMatches[pdlIt];
-      bestPattern = pdlMatch->pattern;
-    }
-
-    if (!bestPattern)
-      break;
-
-    // Update the pattern iterator on failure so that this pattern isn't
-    // attempted again.
-    ++(*bestPatternIt);
-
-    // Check that the pattern can be applied.
-    if (canApply && !canApply(*bestPattern))
-      continue;
-
-    // Try to match and rewrite this pattern. The patterns are sorted by
-    // benefit, so if we match we can immediately rewrite. For PDL patterns, the
-    // match has already been performed, we just need to rewrite.
-    bool matched = false;
-    op->getContext()->executeAction<ApplyPatternAction>(
-        [&]() {
-          rewriter.setInsertionPoint(op);
-#ifndef NDEBUG
-          // Operation `op` may be invalidated after applying the rewrite
-          // pattern.
-          Operation *dumpRootOp = getDumpRootOp(op);
-#endif
-          if (pdlMatch) {
-            result =
-                bytecode->rewrite(rewriter, *pdlMatch, *mutableByteCodeState);
-          } else {
-            LLVM_DEBUG(llvm::dbgs() << "Trying to match \""
-                                    << bestPattern->getDebugName() << "\"\n");
-
-            const auto *pattern =
-                static_cast<const RewritePattern *>(bestPattern);
-            result = pattern->matchAndRewrite(op, rewriter);
-
-            LLVM_DEBUG(llvm::dbgs()
-                       << "\"" << bestPattern->getDebugName() << "\" result "
-                       << succeeded(result) << "\n");
-          }
-
-          // Process the result of the pattern application.
-          if (succeeded(result) && onSuccess && failed(onSuccess(*bestPattern)))
-            result = failure();
-          if (succeeded(result)) {
-            LLVM_DEBUG(logSucessfulPatternApplication(dumpRootOp));
-            matched = true;
-            return;
-          }
-
-          // Perform any necessary cleanups.
-          if (onFailure)
-            onFailure(*bestPattern);
-        },
-        {op}, *bestPattern);
-    if (matched)
-      break;
-  } while (true);
-
-  if (mutableByteCodeState)
-    mutableByteCodeState->cleanupAfterMatchAndRewrite();
+  }
   return result;
+
+//   // Before checking native patterns, first match against the bytecode. This
+//   // won't automatically perform any rewrites so there is no need to worry about
+//   // conflicts.
+//   SmallVector<PDLByteCode::MatchResult, 4> pdlMatches;
+//   const PDLByteCode *bytecode = frozenPatternList.getPDLByteCode();
+//   if (bytecode)
+//     bytecode->match(op, rewriter, pdlMatches, *mutableByteCodeState);
+
+//   // Check to see if there are patterns matching this specific operation type.
+//   MutableArrayRef<const RewritePattern *> opPatterns;
+//   auto patternIt = patterns.find(op->getName());
+//   if (patternIt != patterns.end())
+//     opPatterns = patternIt->second;
+
+//   // Process the patterns for that match the specific operation type, and any
+//   // operation type in an interleaved fashion.
+//   unsigned opIt = 0, opE = opPatterns.size();
+//   unsigned anyIt = 0, anyE = anyOpPatterns.size();
+//   unsigned pdlIt = 0, pdlE = pdlMatches.size();
+//   LogicalResult result = failure();
+//   do {
+//     // Find the next pattern with the highest benefit.
+//     const Pattern *bestPattern = nullptr;
+//     unsigned *bestPatternIt = &opIt;
+
+//     /// Operation specific patterns.
+//     if (opIt < opE)
+//       bestPattern = opPatterns[opIt];
+//     /// Operation agnostic patterns.
+//     if (anyIt < anyE &&
+//         (!bestPattern ||
+//          bestPattern->getBenefit() < anyOpPatterns[anyIt]->getBenefit())) {
+//       bestPatternIt = &anyIt;
+//       bestPattern = anyOpPatterns[anyIt];
+//     }
+
+//     const PDLByteCode::MatchResult *pdlMatch = nullptr;
+//     /// PDL patterns.
+//     if (pdlIt < pdlE && (!bestPattern || bestPattern->getBenefit() <
+//                                              pdlMatches[pdlIt].benefit)) {
+//       bestPatternIt = &pdlIt;
+//       pdlMatch = &pdlMatches[pdlIt];
+//       bestPattern = pdlMatch->pattern;
+//     }
+
+//     if (!bestPattern)
+//       break;
+
+//     // Update the pattern iterator on failure so that this pattern isn't
+//     // attempted again.
+//     ++(*bestPatternIt);
+
+//     // Check that the pattern can be applied.
+//     if (canApply && !canApply(*bestPattern))
+//       continue;
+
+//     // Try to match and rewrite this pattern. The patterns are sorted by
+//     // benefit, so if we match we can immediately rewrite. For PDL patterns, the
+//     // match has already been performed, we just need to rewrite.
+//     bool matched = false;
+//     op->getContext()->executeAction<ApplyPatternAction>(
+//         [&]() {
+//           rewriter.setInsertionPoint(op);
+// #ifndef NDEBUG
+//           // Operation `op` may be invalidated after applying the rewrite
+//           // pattern.
+//           Operation *dumpRootOp = getDumpRootOp(op);
+// #endif
+//           if (pdlMatch) {
+//             result =
+//                 bytecode->rewrite(rewriter, *pdlMatch, *mutableByteCodeState);
+//           } else {
+//             LLVM_DEBUG(llvm::dbgs() << "Trying to match \""
+//                                     << bestPattern->getDebugName() << "\"\n");
+
+//             const auto *pattern =
+//                 static_cast<const RewritePattern *>(bestPattern);
+//             result = pattern->matchAndRewrite(op, rewriter);
+
+//             LLVM_DEBUG(llvm::dbgs()
+//                        << "\"" << bestPattern->getDebugName() << "\" result "
+//                        << succeeded(result) << "\n");
+//           }
+
+//           // Process the result of the pattern application.
+//           if (succeeded(result) && onSuccess && failed(onSuccess(*bestPattern)))
+//             result = failure();
+//           if (succeeded(result)) {
+//             LLVM_DEBUG(logSucessfulPatternApplication(dumpRootOp));
+//             matched = true;
+//             return;
+//           }
+
+//           // Perform any necessary cleanups.
+//           if (onFailure)
+//             onFailure(*bestPattern);
+//         },
+//         {op}, *bestPattern);
+//     if (matched)
+//       break;
+//   } while (true);
+
+//   if (mutableByteCodeState)
+//     mutableByteCodeState->cleanupAfterMatchAndRewrite();
+//   return result;
 }

@@ -430,198 +430,202 @@ GreedyPatternRewriteDriver::GreedyPatternRewriteDriver(
 }
 
 bool GreedyPatternRewriteDriver::processWorklist() {
-#ifndef NDEBUG
-  const char *logLineComment =
-      "//===-------------------------------------------===//\n";
+// #ifndef NDEBUG
+//   const char *logLineComment =
+//       "//===-------------------------------------------===//\n";
 
-  /// A utility function to log a process result for the given reason.
-  auto logResult = [&](StringRef result, const llvm::Twine &msg = {}) {
-    logger.unindent();
-    logger.startLine() << "} -> " << result;
-    if (!msg.isTriviallyEmpty())
-      logger.getOStream() << " : " << msg;
-    logger.getOStream() << "\n";
-  };
-  auto logResultWithLine = [&](StringRef result, const llvm::Twine &msg = {}) {
-    logResult(result, msg);
-    logger.startLine() << logLineComment;
-  };
-#endif
+//   /// A utility function to log a process result for the given reason.
+//   auto logResult = [&](StringRef result, const llvm::Twine &msg = {}) {
+//     logger.unindent();
+//     logger.startLine() << "} -> " << result;
+//     if (!msg.isTriviallyEmpty())
+//       logger.getOStream() << " : " << msg;
+//     logger.getOStream() << "\n";
+//   };
+//   auto logResultWithLine = [&](StringRef result, const llvm::Twine &msg = {}) {
+//     logResult(result, msg);
+//     logger.startLine() << logLineComment;
+//   };
+// #endif
 
   bool changed = false;
-  int64_t numRewrites = 0;
-  while (!worklist.empty() &&
-         (numRewrites < config.maxNumRewrites ||
-          config.maxNumRewrites == GreedyRewriteConfig::kNoLimit)) {
+  // int64_t numRewrites = 0;
+  while (!worklist.empty() //&&
+        //  (numRewrites < config.maxNumRewrites ||
+          // config.maxNumRewrites == GreedyRewriteConfig::kNoLimit)
+      ) {
     auto *op = worklist.pop();
 
-    LLVM_DEBUG({
-      logger.getOStream() << "\n";
-      logger.startLine() << logLineComment;
-      logger.startLine() << "Processing operation : '" << op->getName() << "'("
-                         << op << ") {\n";
-      logger.indent();
+    // LLVM_DEBUG({
+    //   logger.getOStream() << "\n";
+    //   logger.startLine() << logLineComment;
+    //   logger.startLine() << "Processing operation : '" << op->getName() << "'("
+    //                      << op << ") {\n";
+    //   logger.indent();
 
-      // If the operation has no regions, just print it here.
-      if (op->getNumRegions() == 0) {
-        op->print(
-            logger.startLine(),
-            OpPrintingFlags().printGenericOpForm().elideLargeElementsAttrs());
-        logger.getOStream() << "\n\n";
-      }
-    });
+    //   // If the operation has no regions, just print it here.
+    //   if (op->getNumRegions() == 0) {
+    //     op->print(
+    //         logger.startLine(),
+    //         OpPrintingFlags().printGenericOpForm().elideLargeElementsAttrs());
+    //     logger.getOStream() << "\n\n";
+    //   }
+    // });
 
-    // If the operation is trivially dead - remove it.
-    if (isOpTriviallyDead(op)) {
-      eraseOp(op);
-      changed = true;
+    // // If the operation is trivially dead - remove it.
+    // if (isOpTriviallyDead(op)) {
+    //   eraseOp(op);
+    //   changed = true;
 
-      LLVM_DEBUG(logResultWithLine("success", "operation is trivially dead"));
-      continue;
-    }
+    //   LLVM_DEBUG(logResultWithLine("success", "operation is trivially dead"));
+    //   continue;
+    // }
 
-    // Try to fold this op. Do not fold constant ops. That would lead to an
-    // infinite folding loop, as every constant op would be folded to an
-    // Attribute and then immediately be rematerialized as a constant op, which
-    // is then put on the worklist.
-    if (!op->hasTrait<OpTrait::ConstantLike>()) {
-      SmallVector<OpFoldResult> foldResults;
-      if (succeeded(op->fold(foldResults))) {
-        LLVM_DEBUG(logResultWithLine("success", "operation was folded"));
-#ifndef NDEBUG
-        Operation *dumpRootOp = getDumpRootOp(op);
-#endif // NDEBUG
-        if (foldResults.empty()) {
-          // Op was modified in-place.
-          notifyOperationModified(op);
-          changed = true;
-          LLVM_DEBUG(logSuccessfulFolding(dumpRootOp));
-#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
-          expensiveChecks.notifyFoldingSuccess();
-#endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
-          continue;
-        }
+//     // Try to fold this op. Do not fold constant ops. That would lead to an
+//     // infinite folding loop, as every constant op would be folded to an
+//     // Attribute and then immediately be rematerialized as a constant op, which
+//     // is then put on the worklist.
+//     if (!op->hasTrait<OpTrait::ConstantLike>()) {
+//       SmallVector<OpFoldResult> foldResults;
+//       if (succeeded(op->fold(foldResults))) {
+//         LLVM_DEBUG(logResultWithLine("success", "operation was folded"));
+// #ifndef NDEBUG
+//         Operation *dumpRootOp = getDumpRootOp(op);
+// #endif // NDEBUG
+//         if (foldResults.empty()) {
+//           // Op was modified in-place.
+//           notifyOperationModified(op);
+//           changed = true;
+//           LLVM_DEBUG(logSuccessfulFolding(dumpRootOp));
+// #if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+//           expensiveChecks.notifyFoldingSuccess();
+// #endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+//           continue;
+//         }
 
-        // Op results can be replaced with `foldResults`.
-        assert(foldResults.size() == op->getNumResults() &&
-               "folder produced incorrect number of results");
-        OpBuilder::InsertionGuard g(*this);
-        setInsertionPoint(op);
-        SmallVector<Value> replacements;
-        bool materializationSucceeded = true;
-        for (auto [ofr, resultType] :
-             llvm::zip_equal(foldResults, op->getResultTypes())) {
-          if (auto value = ofr.dyn_cast<Value>()) {
-            assert(value.getType() == resultType &&
-                   "folder produced value of incorrect type");
-            replacements.push_back(value);
-            continue;
-          }
-          // Materialize Attributes as SSA values.
-          Operation *constOp = op->getDialect()->materializeConstant(
-              *this, ofr.get<Attribute>(), resultType, op->getLoc());
+//         // Op results can be replaced with `foldResults`.
+//         assert(foldResults.size() == op->getNumResults() &&
+//                "folder produced incorrect number of results");
+//         OpBuilder::InsertionGuard g(*this);
+//         setInsertionPoint(op);
+//         SmallVector<Value> replacements;
+//         bool materializationSucceeded = true;
+//         for (auto [ofr, resultType] :
+//              llvm::zip_equal(foldResults, op->getResultTypes())) {
+//           if (auto value = ofr.dyn_cast<Value>()) {
+//             assert(value.getType() == resultType &&
+//                    "folder produced value of incorrect type");
+//             replacements.push_back(value);
+//             continue;
+//           }
+//           // Materialize Attributes as SSA values.
+//           Operation *constOp = op->getDialect()->materializeConstant(
+//               *this, ofr.get<Attribute>(), resultType, op->getLoc());
 
-          if (!constOp) {
-            // If materialization fails, cleanup any operations generated for
-            // the previous results.
-            llvm::SmallDenseSet<Operation *> replacementOps;
-            for (Value replacement : replacements) {
-              assert(replacement.use_empty() &&
-                     "folder reused existing op for one result but constant "
-                     "materialization failed for another result");
-              replacementOps.insert(replacement.getDefiningOp());
-            }
-            for (Operation *op : replacementOps) {
-              eraseOp(op);
-            }
+//           if (!constOp) {
+//             // If materialization fails, cleanup any operations generated for
+//             // the previous results.
+//             llvm::SmallDenseSet<Operation *> replacementOps;
+//             for (Value replacement : replacements) {
+//               assert(replacement.use_empty() &&
+//                      "folder reused existing op for one result but constant "
+//                      "materialization failed for another result");
+//               replacementOps.insert(replacement.getDefiningOp());
+//             }
+//             for (Operation *op : replacementOps) {
+//               eraseOp(op);
+//             }
 
-            materializationSucceeded = false;
-            break;
-          }
+//             materializationSucceeded = false;
+//             break;
+//           }
 
-          assert(constOp->hasTrait<OpTrait::ConstantLike>() &&
-                 "materializeConstant produced op that is not a ConstantLike");
-          assert(constOp->getResultTypes()[0] == resultType &&
-                 "materializeConstant produced incorrect result type");
-          replacements.push_back(constOp->getResult(0));
-        }
+//           assert(constOp->hasTrait<OpTrait::ConstantLike>() &&
+//                  "materializeConstant produced op that is not a ConstantLike");
+//           assert(constOp->getResultTypes()[0] == resultType &&
+//                  "materializeConstant produced incorrect result type");
+//           replacements.push_back(constOp->getResult(0));
+//         }
 
-        if (materializationSucceeded) {
-          replaceOp(op, replacements);
-          changed = true;
-          LLVM_DEBUG(logSuccessfulFolding(dumpRootOp));
-#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
-          expensiveChecks.notifyFoldingSuccess();
-#endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
-          continue;
-        }
-      }
-    }
+//         if (materializationSucceeded) {
+//           replaceOp(op, replacements);
+//           changed = true;
+//           LLVM_DEBUG(logSuccessfulFolding(dumpRootOp));
+// #if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+//           expensiveChecks.notifyFoldingSuccess();
+// #endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+//           continue;
+//         }
+//       }
+//     }
 
-    // Try to match one of the patterns. The rewriter is automatically
-    // notified of any necessary changes, so there is nothing else to do
-    // here.
-    auto canApplyCallback = [&](const Pattern &pattern) {
-      LLVM_DEBUG({
-        logger.getOStream() << "\n";
-        logger.startLine() << "* Pattern " << pattern.getDebugName() << " : '"
-                           << op->getName() << " -> (";
-        llvm::interleaveComma(pattern.getGeneratedOps(), logger.getOStream());
-        logger.getOStream() << ")' {\n";
-        logger.indent();
-      });
-      if (config.listener)
-        config.listener->notifyPatternBegin(pattern, op);
-      return true;
-    };
-    function_ref<bool(const Pattern &)> canApply = canApplyCallback;
-    auto onFailureCallback = [&](const Pattern &pattern) {
-      LLVM_DEBUG(logResult("failure", "pattern failed to match"));
-      if (config.listener)
-        config.listener->notifyPatternEnd(pattern, failure());
-    };
-    function_ref<void(const Pattern &)> onFailure = onFailureCallback;
-    auto onSuccessCallback = [&](const Pattern &pattern) {
-      LLVM_DEBUG(logResult("success", "pattern applied successfully"));
-      if (config.listener)
-        config.listener->notifyPatternEnd(pattern, success());
-      return success();
-    };
-    function_ref<LogicalResult(const Pattern &)> onSuccess = onSuccessCallback;
+    // // Try to match one of the patterns. The rewriter is automatically
+    // // notified of any necessary changes, so there is nothing else to do
+    // // here.
+    // auto canApplyCallback = [&](const Pattern &pattern) {
+    //   LLVM_DEBUG({
+    //     logger.getOStream() << "\n";
+    //     logger.startLine() << "* Pattern " << pattern.getDebugName() << " : '"
+    //                        << op->getName() << " -> (";
+    //     llvm::interleaveComma(pattern.getGeneratedOps(), logger.getOStream());
+    //     logger.getOStream() << ")' {\n";
+    //     logger.indent();
+    //   });
+    //   if (config.listener)
+    //     config.listener->notifyPatternBegin(pattern, op);
+    //   return true;
+    // };
+    // function_ref<bool(const Pattern &)> canApply = canApplyCallback;
+    // auto onFailureCallback = [&](const Pattern &pattern) {
+    //   LLVM_DEBUG(logResult("failure", "pattern failed to match"));
+    //   if (config.listener)
+    //     config.listener->notifyPatternEnd(pattern, failure());
+    // };
+    // function_ref<void(const Pattern &)> onFailure = onFailureCallback;
+    // auto onSuccessCallback = [&](const Pattern &pattern) {
+    //   LLVM_DEBUG(logResult("success", "pattern applied successfully"));
+    //   if (config.listener)
+    //     config.listener->notifyPatternEnd(pattern, success());
+    //   return success();
+    // };
+    // function_ref<LogicalResult(const Pattern &)> onSuccess = onSuccessCallback;
+    function_ref<bool(const Pattern &)> canApply = nullptr;
+    function_ref<void(const Pattern &)> onFailure = nullptr;
+    function_ref<LogicalResult(const Pattern &)> onSuccess = nullptr;
 
-#ifdef NDEBUG
-    // Optimization: PatternApplicator callbacks are not needed when running in
-    // optimized mode and without a listener.
-    if (!config.listener) {
-      canApply = nullptr;
-      onFailure = nullptr;
-      onSuccess = nullptr;
-    }
-#endif // NDEBUG
+// #ifdef NDEBUG
+//     // Optimization: PatternApplicator callbacks are not needed when running in
+//     // optimized mode and without a listener.
+//     if (!config.listener) {
+//       canApply = nullptr;
+//       onFailure = nullptr;
+//       onSuccess = nullptr;
+//     }
+// #endif // NDEBUG
 
-#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
-    if (config.scope) {
-      expensiveChecks.computeFingerPrints(config.scope->getParentOp());
-    }
-    auto clearFingerprints =
-        llvm::make_scope_exit([&]() { expensiveChecks.clear(); });
-#endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+// #if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+//     if (config.scope) {
+//       expensiveChecks.computeFingerPrints(config.scope->getParentOp());
+//     }
+//     auto clearFingerprints =
+//         llvm::make_scope_exit([&]() { expensiveChecks.clear(); });
+// #endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
 
     LogicalResult matchResult =
         matcher.matchAndRewrite(op, *this, canApply, onFailure, onSuccess);
 
     if (succeeded(matchResult)) {
-      LLVM_DEBUG(logResultWithLine("success", "pattern matched"));
-#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
-      expensiveChecks.notifyRewriteSuccess();
-#endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+      // LLVM_DEBUG(logResultWithLine("success", "pattern matched"));
+// #if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+//       expensiveChecks.notifyRewriteSuccess();
+// #endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
       changed = true;
-      ++numRewrites;
+      // ++numRewrites;
     } else {
-      LLVM_DEBUG(logResultWithLine("failure", "pattern failed to match"));
-#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
-      expensiveChecks.notifyRewriteFailure();
-#endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+      // LLVM_DEBUG(logResultWithLine("failure", "pattern failed to match"));
+// #if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+//       expensiveChecks.notifyRewriteFailure();
+// #endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
     }
   }
 
@@ -821,64 +825,67 @@ private:
 
 LogicalResult RegionPatternRewriteDriver::simplify(bool *changed) && {
   bool continueRewrites = false;
-  int64_t iteration = 0;
-  MLIRContext *ctx = getContext();
+  // int64_t iteration = 0;
+  // MLIRContext *ctx = getContext();
   do {
-    // Check if the iteration limit was reached.
-    if (++iteration > config.maxIterations &&
-        config.maxIterations != GreedyRewriteConfig::kNoLimit)
-      break;
+    // // Check if the iteration limit was reached.
+    // if (++iteration > config.maxIterations &&
+    //     config.maxIterations != GreedyRewriteConfig::kNoLimit)
+    //   break;
+    // llvm::outs() << "Iteration: " << iteration << "\n";
 
     // New iteration: start with an empty worklist.
     worklist.clear();
 
-    // `OperationFolder` CSE's constant ops (and may move them into parents
-    // regions to enable more aggressive CSE'ing).
-    OperationFolder folder(getContext(), this);
-    auto insertKnownConstant = [&](Operation *op) {
-      // Check for existing constants when populating the worklist. This avoids
-      // accidentally reversing the constant order during processing.
-      Attribute constValue;
-      if (matchPattern(op, m_Constant(&constValue)))
-        if (!folder.insertKnownConstant(op, constValue))
-          return true;
-      return false;
-    };
+    // // `OperationFolder` CSE's constant ops (and may move them into parents
+    // // regions to enable more aggressive CSE'ing).
+    // OperationFolder folder(getContext(), this);
+    // auto insertKnownConstant = [&](Operation *op) {
+    //   // Check for existing constants when populating the worklist. This avoids
+    //   // accidentally reversing the constant order during processing.
+    //   Attribute constValue;
+    //   if (matchPattern(op, m_Constant(&constValue)))
+    //     if (!folder.insertKnownConstant(op, constValue))
+    //       return true;
+    //   return false;
+    // };
 
-    if (!config.useTopDownTraversal) {
+    // if (!config.useTopDownTraversal) {
       // Add operations to the worklist in postorder.
       region.walk([&](Operation *op) {
-        if (!insertKnownConstant(op))
-          addSingleOpToWorklist(op);
+        // if (!insertKnownConstant(op))
+        // addSingleOpToWorklist(op);
+          worklist.push(op);
       });
-    } else {
-      // Add all nested operations to the worklist in preorder.
-      region.walk<WalkOrder::PreOrder>([&](Operation *op) {
-        if (!insertKnownConstant(op)) {
-          addSingleOpToWorklist(op);
-          return WalkResult::advance();
-        }
-        return WalkResult::skip();
-      });
+    // } else {
+    //   // Add all nested operations to the worklist in preorder.
+    //   region.walk<WalkOrder::PreOrder>([&](Operation *op) {
+    //     // if (!insertKnownConstant(op)) {
+    //       addSingleOpToWorklist(op);
+    //       return WalkResult::advance();
+    //     // }
+    //     // return WalkResult::skip();
+    //   });
 
-      // Reverse the list so our pop-back loop processes them in-order.
-      worklist.reverse();
-    }
+    //   // Reverse the list so our pop-back loop processes them in-order.
+    //   worklist.reverse();
+    // }
 
-    ctx->executeAction<GreedyPatternRewriteIteration>(
-        [&] {
-          continueRewrites = processWorklist();
+    continueRewrites = processWorklist();
+    // ctx->executeAction<GreedyPatternRewriteIteration>(
+    //     [&] {
+    //       continueRewrites = processWorklist();
 
-          // After applying patterns, make sure that the CFG of each of the
-          // regions is kept up to date.
-          if (config.enableRegionSimplification)
-            continueRewrites |= succeeded(simplifyRegions(*this, region));
-        },
-        {&region}, iteration);
+    //       // // After applying patterns, make sure that the CFG of each of the
+    //       // // regions is kept up to date.
+    //       // if (config.enableRegionSimplification)
+    //       //   continueRewrites |= succeeded(simplifyRegions(*this, region));
+    //     },
+    //     {&region}, iteration);
   } while (continueRewrites);
 
-  if (changed)
-    *changed = iteration > 1;
+  // if (changed)
+  //   *changed = iteration > 1;
 
   // Whether the rewrite converges, i.e. wasn't changed in the last iteration.
   return success(!continueRewrites);
@@ -894,9 +901,9 @@ mlir::applyPatternsAndFoldGreedily(Region &region,
   assert(region.getParentOp()->hasTrait<OpTrait::IsIsolatedFromAbove>() &&
          "patterns can only be applied to operations IsolatedFromAbove");
 
-  // Set scope if not specified.
-  if (!config.scope)
-    config.scope = &region;
+  // // Set scope if not specified.
+  // if (!config.scope)
+  //   config.scope = &region;
 
 #if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
   if (failed(verify(config.scope->getParentOp())))
