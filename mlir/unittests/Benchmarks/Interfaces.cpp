@@ -188,5 +188,5 @@ BENCHMARK_DEFINE_F(InterfaceBench, llvm_vectorTraveralCallInterfaceMethod)(bench
   state.SetComplexityN(state.range(0));
 }
 BENCHMARK_REGISTER_F(InterfaceBench, llvm_vectorTraveralCallInterfaceMethod)
-    ->Ranges({{10, 10 * 1000 * 1000}})
+    ->Ranges({{10, 10 * 1000}})
     ->Complexity(benchmark::oN);

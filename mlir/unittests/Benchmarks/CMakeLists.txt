@@ -29,6 +29,7 @@ add_benchmark(MLIR_IR_Benchmark
   Walk.cpp
 
   SimpleConstantFolding.cpp
+  Dynamism.cpp
 
  DEPENDS
   MLIRTestBenchDialectIncGen
