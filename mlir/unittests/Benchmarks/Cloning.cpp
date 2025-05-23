@@ -64,3 +64,18 @@ BENCHMARK_DEFINE_F(Cloning, cloneOps)(benchmark::State &state) {
 BENCHMARK_REGISTER_F(Cloning, cloneOps)
     ->Ranges({{10, 10 * 1000 * 1000}})
     ->Complexity(benchmark::oN);
+
+BENCHMARK_DEFINE_F(Cloning, cloneOp)(benchmark::State &state) {
+  ctx->loadDialect<TestBenchDialect>();
+  OperationState opState(unknownLoc, "testbench.empty");
+  Operation *emptyOp = Operation::create(opState);
+  for (auto _ : state) {
+    for (int j = 0; j < state.range(0); ++j) {
+      benchmark::DoNotOptimize(emptyOp->clone());
+    }
+  }
+  state.SetComplexityN(state.range(0));
+}
+BENCHMARK_REGISTER_F(Cloning, cloneOp)
+    ->Ranges({{10, 10 * 1000 * 1000}})
+    ->Complexity(benchmark::oN);
