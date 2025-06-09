@@ -22,6 +22,7 @@
 
 #include <memory>
 
+#include <valgrind/callgrind.h>
 #include "benchmark/benchmark.h"
 
 using namespace mlir;
@@ -204,6 +205,26 @@ BENCHMARK_REGISTER_F(IRWalk, vectorTraveralOpCastSuccess)
     ->Ranges({{10, 10 * 1000 * 1000}})
     ->Complexity(benchmark::oN);
 
+BENCHMARK_DEFINE_F(IRWalk, vectorTraveralOpIsaSuccess)
+(benchmark::State &state) {
+  ctx->loadDialect<TestBenchDialect>();
+  OpBuilder b = OpBuilder::atBlockBegin(moduleOp->getBody());
+  SmallVector<Operation *> ops;
+  for (int j = 0; j < state.range(0); ++j) {
+    ops.push_back(b.create<EmptyOp>(unknownLoc));
+  }
+  for (auto _ : state) {
+    for (Operation *op : ops) {
+      bool casted = isa<EmptyOp>(op);
+      benchmark::DoNotOptimize(&casted);
+    };
+  }
+  state.SetComplexityN(state.range(0));
+}
+BENCHMARK_REGISTER_F(IRWalk, vectorTraveralOpIsaSuccess)
+    ->Ranges({{10, 10 * 1000 * 1000}})
+    ->Complexity(benchmark::oN);
+
 BENCHMARK_DEFINE_F(IRWalk, vectorTraveralWithoutInterfaceCastFail)
 (benchmark::State &state) {
   ctx->loadDialect<TestBenchDialect>();
@@ -288,6 +309,10 @@ BENCHMARK_REGISTER_F(IRWalk, vectorTraveralOpTraitFail)
     ->Ranges({{10, 10 * 1000 * 1000}})
     ->Complexity(benchmark::oN);
 
+bool trait_check(Operation* op) {
+  return op->hasTrait<OpTrait::SingleBlock>();
+}
+
 BENCHMARK_DEFINE_F(IRWalk, vectorTraveralOpTraitSuccess)
 (benchmark::State &state) {
   ctx->loadDialect<TestBenchDialect>();
@@ -296,6 +321,13 @@ BENCHMARK_DEFINE_F(IRWalk, vectorTraveralOpTraitSuccess)
   for (int j = 0; j < state.range(0); ++j) {
     ops.push_back(b.create<OpWithRegion>(unknownLoc));
   }
+
+  CALLGRIND_START_INSTRUMENTATION;
+  CALLGRIND_ZERO_STATS;
+  trait_check(ops[0]);
+  CALLGRIND_STOP_INSTRUMENTATION;
+  CALLGRIND_DUMP_STATS;
+
   for (auto _ : state) {
     for (Operation *op : ops) {
       bool hasTrait = op->hasTrait<OpTrait::SingleBlock>();

@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <random>
 
+#include <valgrind/callgrind.h>
 #include "benchmark/benchmark.h"
 
 using namespace mlir;
@@ -65,7 +66,7 @@ public:
         moduleB.getIntegerAttr(i32Type, dist(rng))));
 
     // Generate operations based on pattern
-    for (int i = 1; i <= num + 1; i++) {
+    for (int i = 1; i <= num; i++) {
         if (i % 2 == 0) {
             // Add operation
             ops.push_back(moduleB.create<arith::AddIOp>(
@@ -105,36 +106,30 @@ struct ConstantFoldingIntegerAdditionPattern :
     ConstantFoldingIntegerAdditionPattern(MLIRContext *context)
       : OpRewritePattern<arith::AddIOp>(context, /*benefit=*/1) {}
 
+  // Only rewrite integer add operations
   LogicalResult matchAndRewrite(arith::AddIOp op, PatternRewriter &rewriter) const override {
-    // Get operands
-    Value lhs = op.getLhs();
-    Value rhs = op.getRhs();
 
-    // Check if both operands are constants
-    arith::ConstantOp lhsConstOp = lhs.getDefiningOp<arith::ConstantOp>();
-    arith::ConstantOp rhsConstOp = rhs.getDefiningOp<arith::ConstantOp>();
-
+    // Ensure both operands are constants
+    arith::ConstantOp lhsConstOp = op.getLhs().getDefiningOp<arith::ConstantOp>();
+    arith::ConstantOp rhsConstOp = op.getRhs().getDefiningOp<arith::ConstantOp>();
     if (!lhsConstOp || !rhsConstOp) {
         return failure();
     }
 
-    // Extract constant values
+    // Calculate the result of the addition
     auto lhsAttr = lhsConstOp.getValue().dyn_cast<IntegerAttr>();
     auto rhsAttr = rhsConstOp.getValue().dyn_cast<IntegerAttr>();
     if (!lhsAttr || !rhsAttr) {
         return failure();
     }
-
-    // Compute the folded result
     APInt lhsValue = lhsAttr.getValue();
     APInt rhsValue = rhsAttr.getValue();
-    APInt result = lhsValue + rhsValue;
+    APInt result = lhsAttr.getValue() + rhsAttr.getValue();
 
-    // Create a new constant operation with the folded value
+    // Rewrite with the calculated result
     auto resultType = op.getType();
     auto foldedValue = rewriter.getIntegerAttr(resultType, result);
     rewriter.replaceOpWithNewOp<arith::ConstantOp>(op, resultType, foldedValue);
-
     return success();
   }
 };
@@ -148,13 +143,77 @@ struct ConstantFoldingIntegerAdditionPattern :
 
 BENCHMARK_DEFINE_F(SimpleConstantFolding, folding)(benchmark::State &state) {
   ctx->disableMultithreading();
-  int testSize = state.range(0);
+  int testSize = 20; // state.range(0);
+
+  // state.PauseTiming();
+  // moduleOp->getBody()->erase();
+  // moduleOp->getBodyRegion().push_back(new Block);
+  // populateTestModule(testSize);
+  // // moduleOp->print(llvm::outs());
+  // MLIRContext *context = moduleOp->getContext();
+  // RewritePatternSet patterns(context);
+  // patterns.add<ConstantFoldingIntegerAdditionPattern>(context);
+  // Region& region = moduleOp.get()->getRegion(0);
+  // GreedyRewriteConfig config;
+  // config.scope = &region;
+  // CALLGRIND_START_INSTRUMENTATION;
+  // CALLGRIND_ZERO_STATS;
+  // (void)applyPatternsAndFoldGreedily(region, std::move(patterns), config);
+  // CALLGRIND_STOP_INSTRUMENTATION;
+  // CALLGRIND_DUMP_STATS;
+  // // moduleOp->print(llvm::outs());
+
   for (auto _ : state) {
-    state.PauseTiming();
+    for (int j = 0; j < state.range(0); ++j) {
+      state.PauseTiming();
+      moduleOp->getBody()->erase();
+      moduleOp->getBodyRegion().push_back(new Block);
+      populateTestModule(testSize);
+      // moduleOp->print(llvm::outs());
+
+      MLIRContext *context = moduleOp->getContext();
+      RewritePatternSet patterns(context);
+      patterns.add<ConstantFoldingIntegerAdditionPattern>(context);
+
+      Region& region = moduleOp.get()->getRegion(0);
+      GreedyRewriteConfig config;
+      config.scope = &region;
+      // moduleOp->print(llvm::outs());
+      state.ResumeTiming();
+
+
+      // Fold with some optimisations manually elided
+      (void)applyPatternsAndFoldGreedily(region, std::move(patterns), config);
+
+
+      state.PauseTiming();
+      // moduleOp->print(llvm::outs()); exit(-1);
+      if (failed(verify(moduleOp.get()))) {
+        llvm::errs() << "Verifier failed " << __FILE__ << ":" << __LINE__ << "\n";
+        exit(-1);
+      }
+      state.ResumeTiming();
+    }
+  }
+  state.SetComplexityN(state.range(0));
+}
+BENCHMARK_REGISTER_F(SimpleConstantFolding, folding)
+    ->Ranges({{1, 10000}})
+    ->Complexity(benchmark::oN);
+
+
+
+
+
+
+BENCHMARK_DEFINE_F(SimpleConstantFolding, foldingCountCalls)(benchmark::State &state) {
+  ctx->disableMultithreading();
+
+  int testSize = 20;
+  for (auto _ : state) {
     moduleOp->getBody()->erase();
     moduleOp->getBodyRegion().push_back(new Block);
     populateTestModule(testSize);
-    // moduleOp->print(llvm::outs());
 
     MLIRContext *context = moduleOp->getContext();
     RewritePatternSet patterns(context);
@@ -163,23 +222,10 @@ BENCHMARK_DEFINE_F(SimpleConstantFolding, folding)(benchmark::State &state) {
     Region& region = moduleOp.get()->getRegion(0);
     GreedyRewriteConfig config;
     config.scope = &region;
-    state.ResumeTiming();
-
 
     // Fold with some optimisations manually elided
-    (void)applyPatternsAndFoldGreedily(region, std::move(patterns), config);
-
-
-    state.PauseTiming();
-    // moduleOp->print(llvm::outs()); exit(-1);
-    if (failed(verify(moduleOp.get()))) {
-      llvm::errs() << "Verifier failed " << __FILE__ << ":" << __LINE__ << "\n";
-      exit(-1);
-    }
-    state.ResumeTiming();
+    // (void)applyPatternsAndFoldGreedily(region, std::move(patterns), config);
   }
-  state.SetComplexityN(state.range(0));
 }
-BENCHMARK_REGISTER_F(SimpleConstantFolding, folding)
-    ->Ranges({{1, 10000}})
-    ->Complexity(benchmark::oN);
+BENCHMARK_REGISTER_F(SimpleConstantFolding, foldingCountCalls)
+    ->Iterations(1);

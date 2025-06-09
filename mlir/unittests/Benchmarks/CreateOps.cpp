@@ -9,6 +9,7 @@
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/Location.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OperationSupport.h"
@@ -19,6 +20,7 @@
 
 #include <memory>
 
+#include <valgrind/callgrind.h>
 #include "benchmark/benchmark.h"
 
 using namespace mlir;
@@ -48,7 +50,23 @@ public:
 };
 } // namespace
 
+Operation* create_empty_op(UnknownLoc unknownLoc) {
+  OperationState opState(unknownLoc, "testbench.empty");
+  Operation *emptyOp = Operation::create(opState);
+  return emptyOp;
+}
+Operation* build_empty_op(OpBuilder b, UnknownLoc unknownLoc) {
+  Operation *emptyOp = b.create<EmptyOp>(unknownLoc);
+  return emptyOp;
+}
+
 BENCHMARK_DEFINE_F(CreateOps, simple)(benchmark::State &state) {
+  // CALLGRIND_START_INSTRUMENTATION;
+  // CALLGRIND_ZERO_STATS;
+  // create_empty_op(unknownLoc);
+  // CALLGRIND_STOP_INSTRUMENTATION;
+  // CALLGRIND_DUMP_STATS;
+
   for (auto _ : state) {
     for (int j = 0; j < state.range(0); ++j) {
       OperationState opState(unknownLoc, "testbench.empty");
@@ -88,6 +106,13 @@ BENCHMARK_REGISTER_F(CreateOps, withInsert)
 BENCHMARK_DEFINE_F(CreateOps, simpleRegistered)(benchmark::State &state) {
   ctx->loadDialect<TestBenchDialect>();
   OpBuilder b(ctx.get());
+
+  // CALLGRIND_START_INSTRUMENTATION;
+  // CALLGRIND_ZERO_STATS;
+  // build_empty_op(b, unknownLoc);
+  // CALLGRIND_STOP_INSTRUMENTATION;
+  // CALLGRIND_DUMP_STATS;
+
   for (auto _ : state) {
     for (int j = 0; j < state.range(0); ++j) {
       b.create<EmptyOp>(unknownLoc);
@@ -132,6 +157,56 @@ BENCHMARK_DEFINE_F(CreateOps, llvm_withInsertRegistered)
   state.SetComplexityN(state.range(0));
 }
 BENCHMARK_REGISTER_F(CreateOps, llvm_withInsertRegistered)
+    ->Ranges({{10, 10 * 1000 * 1000}})
+    ->Complexity(benchmark::oN);
+
+Operation* create_const_op(MLIRContext* ctx, UnknownLoc unknownLoc, int value) {
+  IntegerType i32Type = IntegerType::get(ctx, 32);
+  IntegerAttr valueAttr = IntegerAttr::get(i32Type, value);
+  OperationState opState(unknownLoc, "arith.constant");
+  opState.addAttribute("value", valueAttr);
+  opState.addTypes(i32Type);
+  Operation *constantOp = Operation::create(opState);
+  return constantOp;
+}
+
+BENCHMARK_DEFINE_F(CreateOps, simpleConstant)(benchmark::State &state) {
+  int value = 42;
+  // CALLGRIND_START_INSTRUMENTATION;
+  // CALLGRIND_ZERO_STATS;
+  // create_const_op(ctx.get(), unknownLoc, value);
+  // CALLGRIND_STOP_INSTRUMENTATION;
+  // CALLGRIND_DUMP_STATS;
+
+  for (auto _ : state) {
+    for (int j = 0; j < state.range(0); ++j) {
+      IntegerType i32Type = IntegerType::get(ctx.get(), 32);
+      IntegerAttr valueAttr = IntegerAttr::get(i32Type, value);
+      OperationState opState(unknownLoc, "arith.constant");
+      opState.addAttribute("value", valueAttr);
+      opState.addTypes(i32Type);
+      Operation *constantOp = Operation::create(opState);
+      benchmark::DoNotOptimize(constantOp);
+    }
+  }
+  state.SetComplexityN(state.range(0));
+}
+BENCHMARK_REGISTER_F(CreateOps, simpleConstant)
+    ->Ranges({{10, 10 * 1000 * 1000}})
+    ->Complexity(benchmark::oN);
+
+BENCHMARK_DEFINE_F(CreateOps, simpleRegisteredConstant)(benchmark::State &state) {
+  ctx->loadDialect<arith::ArithDialect>();
+  OpBuilder b(ctx.get());
+  int value = 42;
+  for (auto _ : state) {
+    for (int j = 0; j < state.range(0); ++j) {
+      benchmark::DoNotOptimize(b.create<arith::ConstantOp>(unknownLoc, b.getI32IntegerAttr(value)));
+    }
+  }
+  state.SetComplexityN(state.range(0));
+}
+BENCHMARK_REGISTER_F(CreateOps, simpleRegisteredConstant)
     ->Ranges({{10, 10 * 1000 * 1000}})
     ->Complexity(benchmark::oN);
 
