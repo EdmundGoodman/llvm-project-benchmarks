@@ -10,7 +10,7 @@ easier-to-find location.
 
 ## Finding the benchmarks
 
-The benchmarks discussed in this talk are available on a branch of Medhi's fork of
+The benchmarks discussed in this talk are available on a branch of Mehdi's fork of
 LLVM [available here](https://github.com/joker-eph/llvm-project/tree/benchmarks),
 with a diff with the main branch
 [available here](https://github.com/llvm/llvm-project/compare/main...joker-eph:llvm-project:benchmarks).
